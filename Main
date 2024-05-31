@@ -1,0 +1,224 @@
+extends TileMap
+
+var GRID_SIZE: int = 8
+
+
+var piece_to_atlas_coords_map: Dictionary
+var board: Dictionary
+
+signal piece_selected(position: Vector2i)
+
+func _init_board():
+	for i in range(GRID_SIZE):
+		for j in range(GRID_SIZE):
+			board[Vector2i(i,j)] = null
+
+func _init_piece_to_atlas_coords_map():
+	var pieces = 'qkrnbp'
+	
+	for index in range(pieces.length()):
+		var piece = pieces[index]
+		#black pawn
+		piece_to_atlas_coords_map[piece] = Vector2i(index,0)
+		
+		#whie pawn
+		piece_to_atlas_coords_map[piece.to_upper()] = Vector2i(index,1)
+	
+
+func _is_dark_square(row: int, col: int) -> bool:
+	return (row + col ) % 2 == 1
+	
+func _ready():
+	_init_board()
+	_init_piece_to_atlas_coords_map()
+	for i in range(GRID_SIZE):
+		for j in range(GRID_SIZE):
+			var is_dark_square = _is_dark_square(i,j)
+			var atlas_coords = Vector2i(0,0) if is_dark_square else Vector2i(1,0)
+			set_cell(0, Vector2i(i,j), 0, atlas_coords)
+	
+	set_board('pppppppp/pppppppp/8/8/8/8/PPPPPPPP/PPPPPPPP w KQkq - 0 1')
+
+
+func clear_position(position: Vector2i):
+	set_cell(1, position)
+	board[position] = null
+
+func set_piece_at_position(piece: String, position: Vector2i):
+	set_cell(1, position, 1, piece_to_atlas_coords_map[piece])
+	board[position] = piece
+	
+
+#rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+func set_board(fen: String):
+	var fen_parts = fen.split(' ')
+	var piece_placement_data = fen_parts[0]
+	
+	var ranks = piece_placement_data.split('/')
+	
+	for row in ranks.size():
+		var rank = ranks[row]
+		var col = 0
+		for value in rank:
+			if value.is_valid_int():
+				col += value.to_int()
+			else:
+				#piece,placte it here
+				var position = Vector2i(col,row)
+				set_piece_at_position(value, position)
+				board[position] = value
+				col += 1
+	
+
+#MOVMENT
+var selected_piece_position: Vector2i = Vector2i(-1,-1)
+
+enum PieceColor {BLACK, WHITE}
+
+func get_color(piece:String) -> PieceColor:
+	var black_pieces = 'qkrnbp'
+	return PieceColor.BLACK if piece in black_pieces else PieceColor.WHITE
+
+func are_different_colors(piece1: String, piece2: String):
+	return get_color(piece1) != get_color(piece2)
+		
+
+#dodaje niebieskie podswietlenie
+func highlight_cell(positions: Vector2i):
+	set_cell(3, positions, 3, Vector2i.ZERO)
+	
+
+# usuwa niebieskie podswietlenie	
+func clear_higlight3():
+	var highlight_cell = get_used_cells(3)
+	for cell in highlight_cell:
+		set_cell(3,Vector2i(cell.x,cell.y))	
+	
+	
+func highlight_positions(positions: Array[Vector2i]):
+	for position in positions:
+		set_cell(2, position, 2, Vector2i.ZERO)
+	
+func clear_highlight():
+	var highlight_cells =	get_used_cells(2)
+	for cell in highlight_cells:
+		set_cell(2, Vector2i(cell.x, cell.y))
+	
+	
+	
+func _is_position_within_bounds(position: Vector2i) -> bool:
+	if position.x < 0 or position.x >7:
+		return false
+	if position.y < 0 or position.y >7:
+		return false
+	return true
+	
+func _is_position_occupied(position: Vector2i) -> bool:
+	return board[position] != null
+	
+func generate_valid_pawn_position(piece: String,from_position: Vector2i) -> Array[Vector2i]:
+	var direction = Vector2i.UP if piece == 'P' else Vector2i.DOWN
+	var base_position = 6 if piece == 'P' else 1
+	
+	var valid_positions: Array[Vector2i] = []
+	
+	var target_position = from_position + direction
+	if not _is_position_occupied(target_position):
+		valid_positions.append(target_position)
+	
+	# base position, two steps allowed
+	if from_position.y == base_position:
+		target_position = from_position + (direction * 2)
+		if not _is_position_occupied(target_position):
+			valid_positions.append(target_position)
+			
+	# capture positions
+	# if in any of the 2 diagonals there is an opponent piece its valid position
+	var diagonal_positions = [from_position + direction + Vector2i.RIGHT, from_position + direction + Vector2i.LEFT]
+	for position in diagonal_positions:
+		if _is_position_occupied(position):
+			if are_different_colors(piece, board[position]):
+				valid_positions.append(position)
+	return valid_positions
+	
+func generate_validk_king_positions(piece, from_position) -> Array[Vector2i]:
+	var valid_positions: Array[Vector2i] = []
+	for direction in [Vector2i(1,1), Vector2i(1, -1), Vector2i(-1,1), Vector2i(-1,-1), Vector2i.UP, Vector2i.DOWN, Vector2i.RIGHT, Vector2i.LEFT]:
+		var target_position = from_position + direction
+		if target_position in board:
+			if not _is_position_occupied(target_position):
+				valid_positions.append(target_position)
+			elif are_different_colors(piece, board[target_position]):
+				# capture
+				valid_positions.append(target_position)
+				
+	return valid_positions
+	
+	
+func generate_valid_move_position(from_position: Vector2i) -> Array[Vector2i]:
+	var piece = board[from_position]
+	
+	if piece == 'p' or piece == 'P':
+		return generate_validk_king_positions(piece, from_position)
+	return []
+
+func is_valid_move(from_position: Vector2i, to_position: Vector2i) -> bool:
+	# check within bounds
+	if not _is_position_within_bounds(from_position) or not _is_position_within_bounds(to_position):
+		return false
+		
+	var valid_move_positions = generate_valid_move_position(from_position)
+	return to_position in valid_move_positions
+	
+
+func move_piece(from_position: Vector2i, to_position: Vector2i):
+	var piece = board[from_position]
+	set_piece_at_position(piece, to_position)
+	clear_position(from_position)
+
+func _input(event):
+
+	if event is InputEventMouseButton:
+		if event.get_button_index() == MOUSE_BUTTON_LEFT and event.is_pressed():
+			clear_higlight3()
+			clear_highlight()
+			var click_position = local_to_map(get_local_mouse_position())
+			
+			
+				
+			
+			if selected_piece_position == Vector2i(-1,-1):
+				# if pice is not selected yes, update selected piece position
+				if _is_position_within_bounds(click_position) and board[click_position] != null:
+					selected_piece_position = click_position
+					print('Selected piece at position: ', selected_piece_position)
+					highlight_cell(click_position)
+					emit_signal("piece_selected", selected_piece_position)
+					
+			else:
+				if _is_position_within_bounds(click_position):
+					# piece already selected 
+					var already_selectedpiece = board[selected_piece_position]
+					if board[click_position] != null:
+						# there is a piece at the target position, check if friendly
+						if not are_different_colors(already_selectedpiece , board[click_position]):
+							# change selection to the new piece
+							selected_piece_position = click_position
+							highlight_cell(click_position)
+							emit_signal("piece_selected", selected_piece_position)
+							
+							return
+					# attempt to move the piece
+					print('Move requested from: ', selected_piece_position, ' to: ', click_position)
+					if is_valid_move(selected_piece_position,click_position):
+						move_piece(selected_piece_position,click_position)
+					clear_higlight3()
+					clear_highlight()
+					
+					selected_piece_position = Vector2i(-1,-1)
+
+	
+
+func _on_piece_selected(position):
+	var valid_move_positions =  generate_valid_move_position(selected_piece_position)
+	highlight_positions(valid_move_positions)
